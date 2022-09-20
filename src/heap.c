@@ -80,12 +80,39 @@ void heap_destroy(heap_t* heap)
 	tlsf_destroy(heap->tlsf);
 
 	arena_t* arena = heap->arena;
+	tlsf_custom_walk_pool(arena->pool, NULL, NULL);
+	debug_backtrace(heap, 32);
 	while (arena)
 	{
 		arena_t* next = arena->next;
 		VirtualFree(arena, 0, MEM_RELEASE);
 		arena = next;
 	}
-
 	VirtualFree(heap, 0, MEM_RELEASE);
+}
+
+static void custom_walker(void* ptr, size_t size, int used, void* user)
+{
+	(void)user;
+	if(used)
+	{
+		debug_print(k_print_error, "MEMORY LEAKED AT %p with size: %x (%p)\n", ptr, (unsigned int)size, block_to_ptr(ptr));
+	}
+}
+
+void tlsf_custom_walk_pool(pool_t pool, tlsf_walker walker, void* user)
+{
+	tlsf_walker pool_walker = walker ? walker : custom_walker;
+	block_header_t* block =
+		offset_to_block(pool, -(int)block_header_overhead);
+
+	while (block && !block_is_last(block))
+	{
+		pool_walker(
+			block_to_ptr(block),
+			block_size(block),
+			!block_is_free(block),
+			user);
+		block = block_next(block);
+	}
 }
